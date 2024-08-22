@@ -1,3 +1,9 @@
+# Virtual Environments (User-specific, feel free to add your own here.)
+at_3.12.5/
+
+# VS Code garbage
+.vscode
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

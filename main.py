@@ -13,11 +13,13 @@ import serial.tools.list_ports
 import math, time, json
 import datetime as dt
 import threading
+import re
 
 DIM_X = 1280
 DIM_Y = 720
 
 serial_lock = threading.Lock()
+enable_trace = False
 
 root = tk.Tk()
 root.title("AT Commander")
@@ -29,7 +31,9 @@ BUTTON_WIDTH    = 15    # Width is the horizontal measurement, in this context
 PADDING_X       = 5
 PADDING_Y       = 5
 LABEL_FONT      = font.Font(root=root, family="Consolas", size=12)
-MONITOR_FONT   = font.Font(root=root, family="Consolas", size=12)
+MONITOR_FONT    = font.Font(root=root, family="Consolas", size=12)
+DARK_GRAY       = "#1f1f1f"
+WHITE           = "white"
 
 nRF9160 = serial.Serial()
 notebook = ttk.Notebook(root)
@@ -38,7 +42,7 @@ settings_tab = ttk.Frame(notebook)
 commands_tab = ttk.Frame(notebook,width=DIM_X)
 notebook.add(settings_tab, text="Settings")
 notebook.add(commands_tab, text="Commands")
-serial_monitor = Text(root, height="100", width="150", fg="white", bg="black", blockcursor=True, insertbackground="green", font=MONITOR_FONT)
+serial_monitor = Text(root, height="100", width="150", fg=WHITE, bg=DARK_GRAY, font=MONITOR_FONT)
 
 
 ###################################################################################################
@@ -63,6 +67,7 @@ class SerialPowerSwitch(tk.Button):
         if nRF9160.is_open:
             try:
                 nRF9160.close()
+                serial_monitor.insert(tk.END, f"Closed connection to PORT={port_svar.get()}, BAUD={baud_ivar.get()}.\r\n")
                 self.is_on = False
             except:
                 serial_monitor.insert(tk.END, "Failed to close serial device.\r\n")
@@ -87,9 +92,47 @@ class SerialPowerSwitch(tk.Button):
 
         # Recolor button to match the status of the connection
         if self.is_on:
-            self.configure(bg="green", text="On")
+            self.configure(bg="light green", text="On")
         else:
             self.configure(bg="red", text="Off")
+
+class LiveTraceSwitch(tk.Button):
+    """A custom button used to toggle live modem tracing
+
+    Args:
+        master: The master container of the button
+        **kwargs:   Any additional arguments belonging to the parent class tk.Button
+    """
+    def __init__(self, master=None, **kwargs):
+        super().__init__(master, command=self.toggle, **kwargs)
+        self.is_on = False
+        self.enable_trace = False
+        self.configure(width=10, relief="raised", bg="red", text="Off")
+    
+    def toggle(self):
+        """Toggles the connection to the serial device
+        """
+        self.is_on = not self.is_on
+        # Recolor button to match the status of the connection
+        if self.is_on:
+            self.configure(bg="light green", text="On")
+            self.enable_trace = True
+            self.serial_thread = threading.Thread(target=self.live_trace, daemon=True)
+            self.serial_thread.start()
+        else:
+            self.configure(bg="red", text="Off")
+            self.enable_trace = False
+            self.serial_thread = None
+
+    def live_trace(self):
+        global nRF9160
+        while self.enable_trace:
+            if nRF9160.is_open:
+                with serial_lock:
+                    if nRF9160.in_waiting > 0:
+                        data = remove_ansi_escape_codes(nRF9160.readline().decode('utf-8').strip())
+                        if data:
+                            serprint(data)
 
 class Tooltip:
     def __init__(self, widget, text):
@@ -151,12 +194,11 @@ class ATButton(tk.Button):
             with serial_lock:
                 if nRF9160.is_open:
                     stamps = []
-                    prev_response = ""
                     serprint(f"{get_timestamp()} -> {cmd.cmd_s}")
                     nRF9160.write(f"{cmd.cmd_s}\r\n".encode())
                     response = nRF9160.read_all().decode()
                     while not "OK" in response and not "ERROR" in response:
-                        response = nRF9160.read_all().decode('utf-8')
+                        response = nRF9160.read_all().decode()
                         stamps.append(get_timestamp())
 
                     lines = response.split("\n")
@@ -239,15 +281,23 @@ def get_timestamp() -> str:
 def disable_typing(event) -> str:
     return "break"
 
-def live_trace():
-    while True:
-        if nRF9160.is_open:
-            with serial_lock:
-                if nRF9160.in_waiting > 0:
-                    data = nRF9160.readline().decode('utf-8').strip()
-                    if data:
-                        serial_monitor.insert(tk.END, f"{data}\r\n")
-                        serial_monitor.see(tk.END)
+def remove_ansi_escape_codes(text) -> str:
+    """Used to remove the ANSI escape codes "ESC" (escape) and "[0m" (text color reset)
+
+    Args:
+        text (str): The text to be purged of undesirable symbols
+
+    Returns:
+        str: The newly pruned string
+    """
+    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+    return ansi_escape.sub('', text)
+
+def on_copy():
+    # Because Ctrl+C is not working natively for some dumb reason
+    root.clipboard_clear()                                                        # Clear the clipboard
+    serial_monitor.clipboard_append(serial_monitor.get("sel.first", "sel.last"))  # Append selected text to clip board
+
 
 
 ###################################################################################################
@@ -270,36 +320,53 @@ OPTION_CNF = {
     "anchor": tk.W
 }
 
-# COMPORT WIDGETS
+# COLUMN 1
+column1 = tk.Frame(settings_tab)
+column1.pack(side=tk.LEFT)
+
+# COMPORT SELECT
 port_list = get_devices()                                       # Get list of serial ports
-port_frame = tk.Frame(settings_tab)                             # Make frame for port selection
-port_frame.pack(anchor=tk.W)                                    # Pack frame into GUI
+port_frame = tk.Frame(column1)                             # Make frame for port selection
+port_frame.pack(side=tk.TOP)                                    # Pack frame into GUI
 port_labl = Label(port_frame, text="Port:", cnf=LABEL_CNF)      #   Label the selection box
 port_labl.pack(side=tk.LEFT)                                    #   Pack the label into the frame
 port_svar = StringVar(root)                                     #   Create a variable to store port selectin
 port_svar.set("Select Port")                                    #   Default variable to display "Select Port"
 port_menu = OptionMenu(port_frame, port_svar, *port_list)       #   Create drop-down menu listing port options
 port_menu.config(font=LABEL_FONT, cnf=OPTION_CNF)               #   Configure the menu style
-port_menu.pack(side=tk.LEFT, anchor=tk.W)                       #   Pack menu into frame
+port_menu.pack(side=tk.LEFT)                       #   Pack menu into frame
 
-# BAUDRATE WIDGETS
-baud_frame = tk.Frame(settings_tab)                             # Make frame for baud selection
-baud_frame.pack(anchor=tk.W)                                    # Pack frame into GUI
+# BAUDRATE SELECT
+baud_frame = tk.Frame(column1)                             # Make frame for baud selection
+baud_frame.pack(side=tk.TOP)                                    # Pack frame into GUI
 baud_labl = Label(baud_frame, text="Baud:", cnf=LABEL_CNF)      #   Label the selection box
-baud_labl.pack(side=tk.LEFT, anchor=tk.W)                       #   Pack the label into the frame
+baud_labl.pack(side=tk.LEFT)                       #   Pack the label into the frame
 baud_ivar = IntVar(root)                                        #   Create a variable to store the baud rate
 baud_ivar.set(DEFAULT_BAUD)                                     #   Set the baud rate to the default value (115200)
 baud_menu = OptionMenu(baud_frame, baud_ivar, *BAUD_OPTIONS)    #   Create Drop-down menu listing baud options
 baud_menu.config(font=LABEL_FONT, cnf=OPTION_CNF)               #   Configure the menu style
-baud_menu.pack(side=tk.LEFT, anchor=tk.W)                       #   Pack menu into frame
+baud_menu.pack(side=tk.LEFT)                       #   Pack menu into frame
 
-# OPEN SERIAL DEVICE
-conn_frame = tk.Frame(settings_tab)                                         # Make frame for serial connect button
-conn_frame.pack(anchor=tk.W)                                                # Pack frame into GUI
+# CONNECT BUTTON
+conn_frame = tk.Frame(column1)                                         # Make frame for serial connect button
+conn_frame.pack(side=tk.TOP)                                                # Pack frame into GUI
 conn_labl = Label(conn_frame, text="Connection:", cnf=LABEL_CNF)            #   Label the connect button
 conn_labl.pack(side=tk.LEFT)                                                #   Pack label into the frame
 conn_switch = SerialPowerSwitch(master=conn_frame, font=LABEL_FONT)         #   Create toggle switch button
-conn_switch.pack(side=tk.LEFT,anchor=tk.W,padx=PADDING_X,pady=PADDING_Y)    #   Pack button into frame
+conn_switch.pack(side=tk.LEFT,padx=PADDING_X,pady=PADDING_Y)    #   Pack button into frame
+
+# COLUMN 2
+column2 = tk.Frame(settings_tab)
+column2.pack(side=tk.LEFT, fill=tk.Y)
+
+# LIVE TRACE BUTTON
+trac_frame = tk.Frame(column2)                                         # Make frame for serial connect button
+trac_frame.pack(side=tk.TOP)                                                # Pack frame into GUI
+trac_labl = Label(column2, text="Live Trace:", cnf=LABEL_CNF)            #   Label the connect button
+trac_labl.pack(side=tk.LEFT)                                                #   Pack label into the frame
+trac_switch = LiveTraceSwitch(master=column2, font=LABEL_FONT)         #   Create toggle switch button
+trac_switch.pack(side=tk.LEFT,padx=PADDING_X,pady=PADDING_Y)    #   Pack button into frame
+
 
 # AT BUTTONS
 at_buttons = []
@@ -322,8 +389,7 @@ def get_columns(event=None):
 commands_tab.bind("<Configure>", get_columns)
 serial_monitor.pack(padx=PADDING_X, pady=PADDING_Y)
 serial_monitor.bind("<Key>", disable_typing)
-serial_thread = threading.Thread(target=live_trace, daemon=True)
-serial_thread.start()
+serial_monitor.bind("<Control-c>", lambda event: on_copy())
 
 root.mainloop()
 

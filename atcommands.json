@@ -1,0 +1,49 @@
+{
+    "general": [
+        {
+            "command":  "+CNUM",
+            "description":  "Get the SIM's cell number",
+            "response_line_count": 1
+        },
+        {
+            "command":  "+CGMI",
+            "description":  "Manufacturer identification",
+            "response_line_count": 1
+        },
+        {
+            "command":  "+CGMM",
+            "description":  "Model identification",
+            "response_line_count": 1
+        },
+        {
+            "command":  "+CGMR",
+            "description":  "Revision identification",
+            "response_line_count": 1
+        },
+        {
+            "command":  "+CGSN",
+            "description":  "Product serial number identification",
+            "response_line_count": 1
+        },
+        {
+            "command":  "%SHORTSWVER",
+            "description":  "Short software identification",
+            "response_line_count": 1
+        },
+        {
+            "command":  "%HWVERSION",
+            "description":  "Hardware identification",
+            "response_line_count": 1
+        },
+        {
+            "command":  "%XMODEMUUID",
+            "description":  "Modem build UUID",
+            "response_line_count": 1
+        },
+        {
+            "command":  "%2DID",
+            "description":  "SiP 2DID",
+            "response_line_count": 1
+        }
+    ]
+}

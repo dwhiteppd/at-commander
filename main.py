@@ -12,9 +12,12 @@ import serial.tools
 import serial.tools.list_ports
 import math, time, json
 import datetime as dt
+import threading
 
 DIM_X = 1280
 DIM_Y = 720
+
+serial_lock = threading.Lock()
 
 root = tk.Tk()
 root.title("AT Commander")
@@ -135,60 +138,61 @@ class ATButton(tk.Button):
     def __init__(self, at_command:ATCommand, master:Tk=commands_tab):
         super().__init__(master=master, command=self.submit_cmd)
         self.at_command = at_command
-        self.config(text=f"AT{at_command.cmd_s}",font=LABEL_FONT,width=BUTTON_WIDTH)
+        self.config(text=f"{at_command.cmd_s}",font=LABEL_FONT,width=BUTTON_WIDTH)
         self.tooltip = Tooltip(self, at_command.hint_s)
 
     def submit_cmd(self) -> None:
-        self.send_at_cmd(self.at_command)
+        # Running "submit_cmd" in separate thread to prevent blocking the main thread
+        threading.Thread(target=self.send_at_cmd,args=(self.at_command,), daemon=True).start()
 
     def send_at_cmd(self, cmd: ATCommand) -> None:
         global nRF9160
         if nRF9160 is not None:
-            if nRF9160.is_open:
-                stamps = []
-                prev_response = ""
-                serprint(f"{get_timestamp()} -> {cmd.cmd_s}")
-                nRF9160.write(f"AT{cmd.cmd_s}\r\n".encode())
-                response = nRF9160.read_all().decode()
-                while not "OK" in response and not "ERROR" in response:
+            with serial_lock:
+                if nRF9160.is_open:
+                    stamps = []
+                    prev_response = ""
+                    serprint(f"{get_timestamp()} -> {cmd.cmd_s}")
+                    nRF9160.write(f"{cmd.cmd_s}\r\n".encode())
                     response = nRF9160.read_all().decode()
-                    stamps.append(get_timestamp())
+                    while not "OK" in response and not "ERROR" in response:
+                        response = nRF9160.read_all().decode('utf-8')
+                        stamps.append(get_timestamp())
 
-                lines = response.split("\n")
-                for i in range(len(lines)-2):
-                    lines[i] = f"{stamps[i]} <- {lines[i]}"
-                    print(lines[i])
-                prev_line = lines[0]
+                    lines = response.split("\n")
+                    for i in range(len(lines)-2):
+                        lines[i] = f"{stamps[i]} <- {lines[i]}"
+                    prev_line = lines[0]
 
-                # Command returns one line
-                if cmd.one_liner:
-                    for line in lines:
-                        if line.strip() in "OK":
-                            serprint(prev_line)
-                            break
-                        prev_line = line
+                    # Command returns one line
+                    if cmd.one_liner:
+                        for line in lines:
+                            if line.strip() in "OK":
+                                serprint(prev_line)
+                                break
+                            prev_line = line
 
-                # Command returns multiple lines
-                else:
-                    for line in lines:
-                        # If command has a specific ignore rule
-                        if cmd.ignore_s:
-                            if not cmd.ignore_s in line and not "OK" in line:
+                    # Command returns multiple lines
+                    else:
+                        for line in lines:
+                            # If command has a specific ignore rule
+                            if cmd.ignore_s:
+                                if not cmd.ignore_s in line and not "OK" in line:
+                                    serprint(line)
+                            # Else if the response has not finished
+                            elif not "OK" in line:
                                 serprint(line)
-                        # Else if the response has not finished
-                        elif not "OK" in line:
-                            serprint(line)
 
-                        # If the command returned an error
-                        if "ERROR" in line:
-                            break
-                        # If the command finished returning a response
-                        if "OK" in line:
-                            break
-            elif port_svar.get() != "Select Port":
-                serprint(f"{get_timestamp()} Error: Serial Device \"{port_svar.get()}\" is not open.")
-            else:
-                serprint(f"{get_timestamp()} Error: Please select a serial port.")
+                            # If the command returned an error
+                            if "ERROR" in line:
+                                break
+                            # If the command finished returning a response
+                            if "OK" in line:
+                                break
+                elif port_svar.get() != "Select Port":
+                    serprint(f"{get_timestamp()} Error: Serial Device \"{port_svar.get()}\" is not open.")
+                else:
+                    serprint(f"{get_timestamp()} Error: Please select a serial port.")
 
 
 
@@ -234,6 +238,16 @@ def get_timestamp() -> str:
 
 def disable_typing(event) -> str:
     return "break"
+
+def live_trace():
+    while True:
+        if nRF9160.is_open:
+            with serial_lock:
+                if nRF9160.in_waiting > 0:
+                    data = nRF9160.readline().decode('utf-8').strip()
+                    if data:
+                        serial_monitor.insert(tk.END, f"{data}\r\n")
+                        serial_monitor.see(tk.END)
 
 
 ###################################################################################################
@@ -308,6 +322,8 @@ def get_columns(event=None):
 commands_tab.bind("<Configure>", get_columns)
 serial_monitor.pack(padx=PADDING_X, pady=PADDING_Y)
 serial_monitor.bind("<Key>", disable_typing)
+serial_thread = threading.Thread(target=live_trace, daemon=True)
+serial_thread.start()
 
 root.mainloop()
 

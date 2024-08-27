@@ -14,6 +14,8 @@ import math, time, json
 import datetime as dt
 import threading
 import re
+import os
+from PIL import Image, ImageTk
 
 DIM_X = 1280
 DIM_Y = 720
@@ -369,18 +371,28 @@ trac_switch.pack(side=tk.LEFT,padx=PADDING_X,pady=PADDING_Y)    #   Pack button 
 
 
 # AT BUTTONS
-at_buttons = []
+command_buttons = []
 at_commands = load_commands()
 for command in at_commands:
-    at_buttons.append(ATButton(command))
+    command_buttons.append(ATButton(command))
+
+save_icon_name = "icon_save.jpg"
+save_icon_image = Image.open(save_icon_name)
+new_image = save_icon_image.resize((32, 32), Image.Resampling.LANCZOS)
+photo = ImageTk.PhotoImage(new_image)
+
+save_button = tk.Button(master=commands_tab,image=photo,text="Save Log",compound=tk.LEFT,font=LABEL_FONT)
+save_button.config(width=100)
+command_buttons.append(save_button)
+
 
 def get_columns(event=None):
     root.update_idletasks()  # Ensure all geometry is updated
-    button_width_pixels = at_buttons[0].winfo_reqwidth()  # Get the actual width of the buttons in pixels
+    button_width_pixels = command_buttons[0].winfo_reqwidth()  # Get the actual width of the buttons in pixels
     commands_tab_width = commands_tab.winfo_width()       # Get the current width of the commands tab
     columns = max(1, int(commands_tab_width / button_width_pixels))  # Calculate the number of columns
 
-    for i, button in enumerate(at_buttons):
+    for i, button in enumerate(command_buttons):
         row = i // columns  # Calculate row number
         col = i % columns   # Calculate column number
         button.grid(row=row, column=col, padx=PADDING_X, pady=PADDING_Y)

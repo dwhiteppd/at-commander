@@ -28,6 +28,7 @@ root.title("AT Commander")
 root.geometry(f"{DIM_X}x{DIM_Y}")
 
 BAUD_OPTIONS    = [115200, 9600]
+DEFAULT_PORT    = "Select Port"
 DEFAULT_BAUD    = 115200
 BUTTON_WIDTH    = 15    # Width is the horizontal measurement, in this context
 PADDING_X       = 5
@@ -300,6 +301,21 @@ def on_copy():
     root.clipboard_clear()                                                        # Clear the clipboard
     serial_monitor.clipboard_append(serial_monitor.get("sel.first", "sel.last"))  # Append selected text to clip board
 
+def load_settings() -> Tuple[Union[str,None], int]:
+    try:
+        with open("settings.json", 'r') as file:
+            data = json.load(file)
+            for s in data["settings"]:
+                port = s["port"]
+                baudrate = s["baudrate"]
+    except:
+        print("settings.json could not be opened or is missing. Using default settings.")
+        port = DEFAULT_PORT
+        baudrate = DEFAULT_BAUD
+        pass
+
+    return port, baudrate
+
 
 
 ###################################################################################################
@@ -322,51 +338,53 @@ OPTION_CNF = {
     "anchor": tk.W
 }
 
+loaded_port, loaded_baud = load_settings()
+
 # COLUMN 1
 column1 = tk.Frame(settings_tab)
 column1.pack(side=tk.LEFT)
 
 # COMPORT SELECT
 port_list = get_devices()                                       # Get list of serial ports
-port_frame = tk.Frame(column1)                             # Make frame for port selection
+port_frame = tk.Frame(column1)                                  # Make frame for port selection
 port_frame.pack(side=tk.TOP)                                    # Pack frame into GUI
 port_labl = Label(port_frame, text="Port:", cnf=LABEL_CNF)      #   Label the selection box
 port_labl.pack(side=tk.LEFT)                                    #   Pack the label into the frame
 port_svar = StringVar(root)                                     #   Create a variable to store port selectin
-port_svar.set("Select Port")                                    #   Default variable to display "Select Port"
+port_svar.set(loaded_port)                                      #   Default variable to display "Select Port"
 port_menu = OptionMenu(port_frame, port_svar, *port_list)       #   Create drop-down menu listing port options
 port_menu.config(font=LABEL_FONT, cnf=OPTION_CNF)               #   Configure the menu style
-port_menu.pack(side=tk.LEFT)                       #   Pack menu into frame
+port_menu.pack(side=tk.LEFT)                                    #   Pack menu into frame
 
 # BAUDRATE SELECT
-baud_frame = tk.Frame(column1)                             # Make frame for baud selection
+baud_frame = tk.Frame(column1)                                  # Make frame for baud selection
 baud_frame.pack(side=tk.TOP)                                    # Pack frame into GUI
 baud_labl = Label(baud_frame, text="Baud:", cnf=LABEL_CNF)      #   Label the selection box
-baud_labl.pack(side=tk.LEFT)                       #   Pack the label into the frame
+baud_labl.pack(side=tk.LEFT)                                    #   Pack the label into the frame
 baud_ivar = IntVar(root)                                        #   Create a variable to store the baud rate
-baud_ivar.set(DEFAULT_BAUD)                                     #   Set the baud rate to the default value (115200)
+baud_ivar.set(loaded_baud)                                      #   Set the baud rate to the default value (115200)
 baud_menu = OptionMenu(baud_frame, baud_ivar, *BAUD_OPTIONS)    #   Create Drop-down menu listing baud options
 baud_menu.config(font=LABEL_FONT, cnf=OPTION_CNF)               #   Configure the menu style
-baud_menu.pack(side=tk.LEFT)                       #   Pack menu into frame
+baud_menu.pack(side=tk.LEFT)                                    #   Pack menu into frame
 
 # CONNECT BUTTON
-conn_frame = tk.Frame(column1)                                         # Make frame for serial connect button
-conn_frame.pack(side=tk.TOP)                                                # Pack frame into GUI
-conn_labl = Label(conn_frame, text="Connection:", cnf=LABEL_CNF)            #   Label the connect button
-conn_labl.pack(side=tk.LEFT)                                                #   Pack label into the frame
-conn_switch = SerialPowerSwitch(master=conn_frame, font=LABEL_FONT)         #   Create toggle switch button
-conn_switch.pack(side=tk.LEFT,padx=PADDING_X,pady=PADDING_Y)    #   Pack button into frame
+conn_frame = tk.Frame(column1)                                      # Make frame for serial connect button
+conn_frame.pack(side=tk.TOP)                                        # Pack frame into GUI
+conn_labl = Label(conn_frame, text="Connection:", cnf=LABEL_CNF)    #   Label the connect button
+conn_labl.pack(side=tk.LEFT)                                        #   Pack label into the frame
+conn_switch = SerialPowerSwitch(master=conn_frame, font=LABEL_FONT) #   Create toggle switch button
+conn_switch.pack(side=tk.LEFT,padx=PADDING_X,pady=PADDING_Y)        #   Pack button into frame
 
 # COLUMN 2
 column2 = tk.Frame(settings_tab)
 column2.pack(side=tk.LEFT, fill=tk.Y)
 
 # LIVE TRACE BUTTON
-trac_frame = tk.Frame(column2)                                         # Make frame for serial connect button
-trac_frame.pack(side=tk.TOP)                                                # Pack frame into GUI
-trac_labl = Label(column2, text="Live Trace:", cnf=LABEL_CNF)            #   Label the connect button
-trac_labl.pack(side=tk.LEFT)                                                #   Pack label into the frame
-trac_switch = LiveTraceSwitch(master=column2, font=LABEL_FONT)         #   Create toggle switch button
+trac_frame = tk.Frame(column2)                                  # Make frame for serial connect button
+trac_frame.pack(side=tk.TOP)                                    # Pack frame into GUI
+trac_labl = Label(column2, text="Live Trace:", cnf=LABEL_CNF)   #   Label the connect button
+trac_labl.pack(side=tk.LEFT)                                    #   Pack label into the frame
+trac_switch = LiveTraceSwitch(master=column2, font=LABEL_FONT)  #   Create toggle switch button
 trac_switch.pack(side=tk.LEFT,padx=PADDING_X,pady=PADDING_Y)    #   Pack button into frame
 
 

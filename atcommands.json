@@ -1,47 +1,62 @@
 {
     "general": [
         {
-            "command":  "+CNUM",
+            "command":  "AT%XMODEMTRACE=1,2",
+            "description":  "Performs a modem trace",
+            "response_line_count": 1
+        },
+        {
+            "command":  "AT%XICCID",
+            "description":  "Returns SIM ICCID",
+            "response_line_count": 1
+        },
+        {
+            "command":  "AT+CEDRXS?",
+            "description":  "Reads the eDRX parameters <AcT-type> and <Requested_eDRX_value>",
+            "response_line_count": 1
+        },
+        {
+            "command":  "AT+CNUM",
             "description":  "Get the SIM's cell number",
             "response_line_count": 1
         },
         {
-            "command":  "+CGMI",
+            "command":  "AT+CGMI",
             "description":  "Manufacturer identification",
             "response_line_count": 1
         },
         {
-            "command":  "+CGMM",
+            "command":  "AT+CGMM",
             "description":  "Model identification",
             "response_line_count": 1
         },
         {
-            "command":  "+CGMR",
+            "command":  "AT+CGMR",
             "description":  "Revision identification",
             "response_line_count": 1
         },
         {
-            "command":  "+CGSN",
-            "description":  "Product serial number identification",
+            "command":  "AT+CGSN",
+            "description":  "Returns device IMEI / Serial Number",
             "response_line_count": 1
         },
         {
-            "command":  "%SHORTSWVER",
+            "command":  "AT%SHORTSWVER",
             "description":  "Short software identification",
             "response_line_count": 1
         },
         {
-            "command":  "%HWVERSION",
+            "command":  "AT%HWVERSION",
             "description":  "Hardware identification",
             "response_line_count": 1
         },
         {
-            "command":  "%XMODEMUUID",
+            "command":  "AT%XMODEMUUID",
             "description":  "Modem build UUID",
             "response_line_count": 1
         },
         {
-            "command":  "%2DID",
+            "command":  "AT%2DID",
             "description":  "SiP 2DID",
             "response_line_count": 1
         }

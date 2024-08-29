@@ -1,0 +1,9 @@
+{
+    "settings": [
+        {
+            "port":  "COM21",
+            "baudrate": 115200,
+            "enable": "false"
+        }
+    ]
+}

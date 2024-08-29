@@ -1,12 +1,13 @@
 # Devon White, PPD 2024
-# AT Commander
-
+# AT Commander - Send commands quickly over serial
 
 import tkinter as tk
 from tkinter import *
 from tkinter import font, ttk
+import tkinter.filedialog
+from tkinter.filedialog import asksaveasfile
 import serial
-from typing import Union, Tuple, List, Optional
+from typing import Union, Tuple, List, Optional, Callable
 
 import serial.tools
 import serial.tools.list_ports
@@ -15,6 +16,7 @@ import datetime as dt
 import threading
 import re
 import os
+import PIL
 from PIL import Image, ImageTk
 
 DIM_X = 1280
@@ -31,21 +33,89 @@ BAUD_OPTIONS    = [115200, 9600]
 DEFAULT_PORT    = "Select Port"
 DEFAULT_BAUD    = 115200
 BUTTON_WIDTH    = 15    # Width is the horizontal measurement, in this context
-PADDING_X       = 5
-PADDING_Y       = 5
+PADDING_X       = 2
+PADDING_Y       = 2
+TOOLBAR_FONT    = font.Font(root=root, family="Consolas", size=8)
 LABEL_FONT      = font.Font(root=root, family="Consolas", size=12)
 MONITOR_FONT    = font.Font(root=root, family="Consolas", size=12)
-DARK_GRAY       = "#1f1f1f"
-WHITE           = "white"
 
+# Custom Colors
+# GRAY_X: Higher X => Lighter Color
+GRAY_0     = "#505050"
+GRAY_1     = "#1f1f1f" 
+GRAY_2     = "#181818"
+LIGHT_ORANGE    = "#ffad65"
+CUST_BLUE       = "#2582fd"
+WHITE           = "white"
+BLACK           = "black"
+DARK_WHITE      = "#9d9d9d"
+LIGHT_GRAY      = "lightgrey"
+GRAY            = "grey"
+
+# GUI Element Colors
+ROOT_BG         = WHITE
+TAB_ACTIVE_FG   = BLACK             # Notch text color for selected tab
+TAB_ACTIVE_BG   = WHITE             # Notch base color for selected tab
+TAB_INACTV_FG   = WHITE             # Notch text color for inactive tab
+TAB_INACTV_BG   = GRAY_1              # Notch base color for inactive tab
+NOTEBOOK_BG     = WHITE             # Color behind tab notches
+TOOLBAR_BG      = LIGHT_GRAY        # Color behind toolbar button icons
+LABEL_FG        = BLACK
+LABEL_BG        = WHITE
+
+LABEL_CNF = {
+    "font": LABEL_FONT,
+    "width": 12,
+    "padx": 5,
+    "pady": 7,
+    "anchor":tk.E,
+    "relief":"flat",
+    "foreground": LABEL_FG,
+    "background": LABEL_BG
+}
+
+OPTION_CNF = {
+    "font": LABEL_FONT,
+    "width": 12,
+    "padx": 5,
+    "pady": 5,
+    "relief": "groove",
+    "anchor": tk.W,
+    "foreground": LABEL_FG,
+    "background": LIGHT_GRAY
+}
+
+TOGGLE_CNF = {
+    "font": LABEL_FONT,
+    "width": 12,
+    "padx": 5,
+    "pady": 5,
+    "relief": "groove",
+    "foreground": LABEL_FG,
+    "background": LABEL_BG
+}
+
+root.config(background=ROOT_BG)
 nRF9160 = serial.Serial()
-notebook = ttk.Notebook(root)
-notebook.pack(expand=True, fill='both')
-settings_tab = ttk.Frame(notebook)
-commands_tab = ttk.Frame(notebook,width=DIM_X)
-notebook.add(settings_tab, text="Settings")
-notebook.add(commands_tab, text="Commands")
-serial_monitor = Text(root, height="100", width="150", fg=WHITE, bg=DARK_GRAY, font=MONITOR_FONT)
+
+# NOTEBOOK/TABS CONFIGURATION
+tab_style = ttk.Style()
+tab_style.theme_create( "50shadesofgray",
+                        settings={
+                           ".":{
+                               "configure":{"background": TAB_ACTIVE_BG}},
+                            "TNotebook":{
+                               "configure":{"background": "lightgrey"}},
+                            "TNotebook.Tab":{
+                                "configure": {"background": NOTEBOOK_BG},
+                                "map":{"background": [("selected", TAB_ACTIVE_BG), ('!active', TAB_INACTV_BG), ('active', TAB_ACTIVE_BG)],
+                                       "foreground": [("selected", TAB_ACTIVE_FG), ('!active', TAB_INACTV_FG), ('active', TAB_ACTIVE_FG)]}}
+                        }
+                    )
+tab_style.theme_use("50shadesofgray")
+notebook = ttk.Notebook(root, style="TNotebook")
+
+serial_monitor = Text(root, height="100", width="150", fg=WHITE, bg=GRAY_1, font=MONITOR_FONT)
 
 
 ###################################################################################################
@@ -56,10 +126,10 @@ class SerialPowerSwitch(tk.Button):
         master: The master container of the button
         **kwargs:   Any additional arguments belonging to the parent class tk.Button
     """
-    def __init__(self, master=None, **kwargs):
+    def __init__(self, master=None, **kwargs) -> None:
         super().__init__(master, command=self.toggle, **kwargs)
         self.is_on = False
-        self.configure(width=10, relief="raised", bg="red", text="Off")
+        self.configure(width=10, relief="groove", bg="red", text="Off")
     
     def toggle(self):
         """Toggles the connection to the serial device
@@ -110,7 +180,8 @@ class LiveTraceSwitch(tk.Button):
         super().__init__(master, command=self.toggle, **kwargs)
         self.is_on = False
         self.enable_trace = False
-        self.configure(width=10, relief="raised", bg="red", text="Off")
+        self.width = 10
+        self.configure(width=self.width, relief="raised", bg="red", text="Off")
     
     def toggle(self):
         """Toggles the connection to the serial device
@@ -138,14 +209,14 @@ class LiveTraceSwitch(tk.Button):
                             serprint(data)
 
 class Tooltip:
-    def __init__(self, widget, text):
+    def __init__(self, widget: Widget, text) -> None:
         self.widget = widget
         self.text = text
         self.tooltip_window = None
         self.widget.bind("<Enter>", self.show_tooltip)
         self.widget.bind("<Leave>", self.hide_tooltip)
 
-    def show_tooltip(self, event):
+    def show_tooltip(self, event) -> None:
         if self.tooltip_window or not self.text:
             return
         x, y, _, _ = self.widget.bbox("insert")
@@ -161,7 +232,7 @@ class Tooltip:
                          font=("Consolas", "10", "normal"))
         label.pack(ipadx=1)
 
-    def hide_tooltip(self, event):
+    def hide_tooltip(self, event) -> None:
         if self.tooltip_window:
             self.tooltip_window.destroy()
             self.tooltip_window = None
@@ -177,17 +248,14 @@ class ATCommand():
 class ATButton(tk.Button):
     """A special button used to control the transmission of AT commands
     """
-
-    # Ignore incoming responses
-    # Prevents confusion with prompted responses vs. non-prompted info dumping
-
-    def __init__(self, at_command:ATCommand, master:Tk=commands_tab):
+    def __init__(self, master:Tk, at_command:ATCommand) -> None:
         super().__init__(master=master, command=self.submit_cmd)
         self.at_command = at_command
         self.config(text=f"{at_command.cmd_s}",font=LABEL_FONT,width=BUTTON_WIDTH)
         self.tooltip = Tooltip(self, at_command.hint_s)
 
     def submit_cmd(self) -> None:
+        # print(f"{self.winfo_width()}x{self.winfo_height()}\r\n")  # DEBUG
         # Running "submit_cmd" in separate thread to prevent blocking the main thread
         threading.Thread(target=self.send_at_cmd,args=(self.at_command,), daemon=True).start()
 
@@ -199,47 +267,65 @@ class ATButton(tk.Button):
                     stamps = []
                     serprint(f"{get_timestamp()} -> {cmd.cmd_s}")
                     nRF9160.write(f"{cmd.cmd_s}\r\n".encode())
-                    response = nRF9160.read_all().decode()
-                    while not "OK" in response and not "ERROR" in response:
+                    try:
                         response = nRF9160.read_all().decode()
-                        stamps.append(get_timestamp())
+                        while not "OK" in response and not "ERROR" in response:
+                            response = nRF9160.read_all().decode()
+                            stamps.append(get_timestamp())
 
-                    lines = response.split("\n")
-                    for i in range(len(lines)-2):
-                        lines[i] = f"{stamps[i]} <- {lines[i]}"
-                    prev_line = lines[0]
+                        lines = response.split("\n")
+                        for i in range(len(lines)-2):
+                            lines[i] = f"{stamps[i]} <- {lines[i]}"
+                        prev_line = lines[0]
 
-                    # Command returns one line
-                    if cmd.one_liner:
-                        for line in lines:
-                            if line.strip() in "OK":
-                                serprint(prev_line)
-                                break
-                            prev_line = line
+                        # Command returns one line
+                        if cmd.one_liner:
+                            for line in lines:
+                                if line.strip() in "OK":
+                                    serprint(prev_line)
+                                    break
+                                prev_line = line
 
-                    # Command returns multiple lines
-                    else:
-                        for line in lines:
-                            # If command has a specific ignore rule
-                            if cmd.ignore_s:
-                                if not cmd.ignore_s in line and not "OK" in line:
+                        # Command returns multiple lines
+                        else:
+                            for line in lines:
+                                # If command has a specific ignore rule
+                                if cmd.ignore_s:
+                                    if not cmd.ignore_s in line and not "OK" in line:
+                                        serprint(line)
+                                # Else if the response has not finished
+                                elif not "OK" in line:
                                     serprint(line)
-                            # Else if the response has not finished
-                            elif not "OK" in line:
-                                serprint(line)
 
-                            # If the command returned an error
-                            if "ERROR" in line:
-                                break
-                            # If the command finished returning a response
-                            if "OK" in line:
-                                break
+                                # If the command returned an error
+                                if "ERROR" in line:
+                                    break
+                                # If the command finished returning a response
+                                if "OK" in line:
+                                    break
+
+                    except Exception as e:
+                        print(f"ERROR: {e}\r\nAttempting to continue...\r\n")
+
                 elif port_svar.get() != "Select Port":
                     serprint(f"{get_timestamp()} Error: Serial Device \"{port_svar.get()}\" is not open.")
                 else:
                     serprint(f"{get_timestamp()} Error: Please select a serial port.")
 
-
+class ToolbarButton(tk.Button):
+    def __init__(self, master:Tk, command:Callable=None, hint:str="<Missing Tooltip>", icon:str=None) -> None:
+        super().__init__(master=master, command=command, background=TOOLBAR_BG)
+        self.config(width=32,height=32)
+        self.tooltip = Tooltip(self, hint)
+        self.icon_image = None
+        if icon:
+            icon_path = icon
+            icon_image = Image.open(icon_path)
+            resized_image = icon_image.resize((30, 30), Image.Resampling.LANCZOS)
+            # new_image = save_icon_image
+            photo = ImageTk.PhotoImage(resized_image)
+            self.config(image=photo)
+            self.icon_image = photo
 
 # END - Custom Classes
 ###################################################################################################
@@ -276,10 +362,17 @@ def load_commands() -> List[ATCommand]:
             commands.append(ATCommand(c['command'],c['description'],one_liner=one_line))
     return commands
 
-def get_timestamp() -> str:
+def get_timestamp(filename_usable:bool=False) -> str:
     ts = dt.datetime.now()
-    ts_str = ts.strftime(format="%m%d%Y-%H:%M:%S.%f")[:-3]
-    return (f"[{ts_str}]")
+
+    # Contains symbols; used for serial output (not valid file names)
+    if not filename_usable:
+        ts_str = ts.strftime(format="%m%d%Y-%H:%M:%S.%f")[:-3]
+        return (f"[{ts_str}]")
+
+    # Valid file name; used for logs    
+    elif filename_usable:
+        return ts.strftime("%Y%m%d_%H%M%S")
 
 def disable_typing(event) -> str:
     return "break"
@@ -302,45 +395,71 @@ def on_copy():
     serial_monitor.clipboard_append(serial_monitor.get("sel.first", "sel.last"))  # Append selected text to clip board
 
 def load_settings() -> Tuple[Union[str,None], int]:
+    port = DEFAULT_PORT
+    baudrate = DEFAULT_BAUD
     try:
         with open("settings.json", 'r') as file:
             data = json.load(file)
             for s in data["settings"]:
-                port = s["port"]
-                baudrate = s["baudrate"]
+                if s["enable"] == "true":
+                    port = s["port"]
+                    baudrate = s["baudrate"]
     except:
         print("settings.json could not be opened or is missing. Using default settings.")
-        port = DEFAULT_PORT
-        baudrate = DEFAULT_BAUD
         pass
 
     return port, baudrate
 
+def save_log() -> None:
+    ts = get_timestamp(filename_usable=True)
+    file = asksaveasfile(confirmoverwrite=True,
+                         defaultextension=".txt",
+                         initialfile=f"atclog_{ts}",
+                         filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+    if file is not None:
+        if file.writable():
+            file.writelines(serial_monitor.get(index1=1.0,index2=tk.END).split("\n"))
+
+def refresh_devices() -> None:
+    port_list = get_devices()
+    port_menu['menu'].delete(0,tk.END)
+
+    for port in port_list:
+        port_menu['menu'].add_command(label=port)
 
 
-###################################################################################################
-# WIDGETS
 
-LABEL_CNF = {
-    "font": LABEL_FONT,
-    "width": 12,
-    "padx": 5,
-    "pady": 5,
-    "anchor": tk.E
-}
 
-OPTION_CNF = {
-    "font": LABEL_FONT,
-    "width": 12,
-    "padx": 5,
-    "pady": 5,
-    "relief": "groove",
-    "anchor": tk.W
-}
-
+####################################################################################################
+######################################### WIDGETS ##################################################
+####################################################################################################
 loaded_port, loaded_baud = load_settings()
 
-# COLUMN 1
+# TOOLBAR BUTTONS
+tool_frame      = tk.Frame(root)
+tool_save       = ToolbarButton(master=tool_frame, command=save_log, hint="Save Log", icon="assets/icon_save_small.png")
+tool_refresh    = ToolbarButton(master=tool_frame, command=refresh_devices, hint="Refresh serial device list", icon="assets/icon_refresh.png")
+tool_settings   = ToolbarButton(master=tool_frame, command=None, hint="Settings: TODO", icon="assets/icon_settings.png")
+tool_export     = ToolbarButton(master=tool_frame, command=None, hint="Export Settings: TODO", icon="assets/icon_export_settings.png")
+
+tool_frame.pack(side=tk.TOP,anchor=tk.W)
+tool_save.pack(side=tk.LEFT)
+tool_refresh.pack(side=tk.LEFT)
+tool_settings.pack(side=tk.LEFT)
+tool_export.pack(side=tk.LEFT)
+
+# SEPARATOR
+separator = ttk.Separator(root, orient=HORIZONTAL)
+separator.pack(fill=X)
+
+# NOTEBOOK AND TABS: PACKING
+notebook.pack(fill='both', padx=2, pady=2)
+settings_tab = ttk.Frame(notebook)
+commands_tab = ttk.Frame(notebook)
+notebook.add(settings_tab, text="Settings")
+notebook.add(commands_tab, text="Commands")
+
+# SETTINGS TAB: COLUMN 1
 column1 = tk.Frame(settings_tab)
 column1.pack(side=tk.LEFT)
 
@@ -373,10 +492,10 @@ conn_frame.pack(side=tk.TOP)                                        # Pack frame
 conn_labl = Label(conn_frame, text="Connection:", cnf=LABEL_CNF)    #   Label the connect button
 conn_labl.pack(side=tk.LEFT)                                        #   Pack label into the frame
 conn_switch = SerialPowerSwitch(master=conn_frame, font=LABEL_FONT) #   Create toggle switch button
-conn_switch.pack(side=tk.LEFT,padx=PADDING_X,pady=PADDING_Y)        #   Pack button into frame
+conn_switch.pack(side=tk.LEFT)        #   Pack button into frame
 
-# COLUMN 2
-column2 = tk.Frame(settings_tab)
+# SETTINGS TAB: COLUMN 2
+column2 = tk.Frame(settings_tab,background=TAB_ACTIVE_BG)
 column2.pack(side=tk.LEFT, fill=tk.Y)
 
 # LIVE TRACE BUTTON
@@ -392,17 +511,7 @@ trac_switch.pack(side=tk.LEFT,padx=PADDING_X,pady=PADDING_Y)    #   Pack button 
 command_buttons = []
 at_commands = load_commands()
 for command in at_commands:
-    command_buttons.append(ATButton(command))
-
-save_icon_name = "icon_save.jpg"
-save_icon_image = Image.open(save_icon_name)
-new_image = save_icon_image.resize((32, 32), Image.Resampling.LANCZOS)
-photo = ImageTk.PhotoImage(new_image)
-
-save_button = tk.Button(master=commands_tab,image=photo,text="Save Log",compound=tk.LEFT,font=LABEL_FONT)
-save_button.config(width=100)
-command_buttons.append(save_button)
-
+    command_buttons.append(ATButton(master=commands_tab, at_command=command))
 
 def get_columns(event=None):
     root.update_idletasks()  # Ensure all geometry is updated

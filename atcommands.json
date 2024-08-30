@@ -1,11 +1,6 @@
 {
     "general": [
         {
-            "command":  "AT%XMODEMTRACE=1,2",
-            "description":  "Performs a modem trace",
-            "response_line_count": 1
-        },
-        {
             "command":  "AT%XICCID",
             "description":  "Returns SIM ICCID",
             "response_line_count": 1

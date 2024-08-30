@@ -178,10 +178,10 @@ class LiveTraceSwitch(tk.Button):
     """
     def __init__(self, master=None, **kwargs):
         super().__init__(master, command=self.toggle, **kwargs)
-        self.is_on = False
-        self.enable_trace = False
+        self.is_on = True
+        self.enable_trace = True
         self.width = 10
-        self.configure(width=self.width, relief="raised", bg="red", text="Off")
+        self.configure(width=self.width, relief="raised", bg="lightgreen", text="On")
     
     def toggle(self):
         """Toggles the connection to the serial device
@@ -421,11 +421,21 @@ def save_log() -> None:
             file.writelines(serial_monitor.get(index1=1.0,index2=tk.END).split("\n"))
 
 def refresh_devices() -> None:
+    global port_list
+    global port_menu
     port_list = get_devices()
     port_menu['menu'].delete(0,tk.END)
 
+    menu = port_menu["menu"]
     for port in port_list:
-        port_menu['menu'].add_command(label=port)
+        menu.add_command(label=port, command=lambda value=port: port_svar.set(value))
+
+    port_svar.set("Select Port")  # Reset to default
+
+def print_info() -> None:
+    serprint(f"port_list        = {port_list}")
+    serprint(f"port_svar        = {port_svar}")
+    serprint(f"port_svar.get()  = {port_svar.get()}")
 
 
 
@@ -441,10 +451,12 @@ tool_save       = ToolbarButton(master=tool_frame, command=save_log, hint="Save 
 tool_refresh    = ToolbarButton(master=tool_frame, command=refresh_devices, hint="Refresh serial device list", icon="assets/icon_refresh.png")
 tool_settings   = ToolbarButton(master=tool_frame, command=None, hint="Settings: TODO", icon="assets/icon_settings.png")
 tool_export     = ToolbarButton(master=tool_frame, command=None, hint="Export Settings: TODO", icon="assets/icon_export_settings.png")
+tool_info       = ToolbarButton(master=tool_frame, command=print_info, hint="Print serial port(s) information", icon="assets/icon_serial_info.png")
 
 tool_frame.pack(side=tk.TOP,anchor=tk.W)
 tool_save.pack(side=tk.LEFT)
 tool_refresh.pack(side=tk.LEFT)
+tool_info.pack(side=tk.LEFT)
 tool_settings.pack(side=tk.LEFT)
 tool_export.pack(side=tk.LEFT)
 

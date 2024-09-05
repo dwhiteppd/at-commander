@@ -118,7 +118,9 @@ notebook = ttk.Notebook(root, style="TNotebook")
 serial_monitor = Text(root, height="100", width="150", fg=WHITE, bg=GRAY_1, font=MONITOR_FONT)
 
 
-###################################################################################################
+####################################################################################################
+###################################### Custom Classes ##############################################
+####################################################################################################
 class SerialPowerSwitch(tk.Button):
     """A custom button used to toggle a serial connection
 
@@ -327,10 +329,111 @@ class ToolbarButton(tk.Button):
             self.config(image=photo)
             self.icon_image = photo
 
-# END - Custom Classes
-###################################################################################################
+class ATScript():
+
+    def __init__(self, filename:str, delay_ms:int=0) -> None:
+        self.filename = filename
+        self.delay_ms = delay_ms
+        self.commands = []
+        self.name = None
+        self.desc = None
 
 
+    def extract_commands(self) -> None:
+        print("extracting commands")
+        # Keywords
+        KW_NAME = "[NAME]"
+        KW_DESC = "[DESC]"
+        KW_STRT = "[START]"
+        KW_STOP = "[END]"
+        running = False
+        with open(self.filename, "r") as f:
+            for line in f.readlines():
+                if line.strip():
+                    if line.strip()[0] != "//":
+                        if not running:
+                            if KW_NAME in line:
+                                line_no_cmnt = line.split("//")[0]
+                                self.name = line_no_cmnt.split(KW_NAME)[1].strip().strip("\"")
+                            elif KW_DESC in line:
+                                line_no_cmnt = line.split("//")[0]
+                                self.desc = line_no_cmnt.split(KW_DESC)[1].strip().strip("\"")
+                            elif KW_STRT in line:
+                                running = True
+                        elif running:
+                            if not KW_STOP in line:
+                                line_no_cmnt = line.split("//")[0]
+                                self.commands.append(line_no_cmnt.split()[0])
+                            else:
+                                running = False
+                                break
+                
+
+    def print_info(self) -> None:
+        print(f"Name: {self.name}")
+        print(f"Desc: {self.desc}")
+        print(f"Commands:")
+        for cmd in self.commands:
+            print(f"\t{cmd}")
+
+    
+class ATScriptButton(tk.Button):
+    def __init__(self, master:Tk, script:ATScript) -> None:
+        super().__init__(master=master, command=self.run_script)
+        print("Making Button")
+        self.script = script
+        self.config(text=f"{script.name}",font=LABEL_FONT,width=BUTTON_WIDTH)
+        self.tooltip = Tooltip(self, script.desc)
+
+    def run_script(self) -> None:
+        print("Running script")
+        # Running "run_script" in separate thread to prevent blocking the main thread
+        threading.Thread(target=self.send_commands,args=(self.script,), daemon=True).start()
+
+    def send_commands(self, script: ATScript) -> None:
+        global nRF9160
+        if nRF9160 is not None:
+            with serial_lock:
+                if nRF9160.is_open:
+                    stamps = []
+                    for cmd in script.commands:
+                        serprint(f"{get_timestamp()} -> {cmd}")
+                        nRF9160.write(f"{cmd}\r\n".encode())
+                        try:
+                            response = nRF9160.read_all().decode()
+                            while not "OK" in response and not "ERROR" in response:
+                                response = nRF9160.read_all().decode()
+                                stamps.append(get_timestamp())
+
+                            lines = response.split("\n")
+                            for i in range(len(lines)-2):
+                                lines[i] = f"{stamps[i]} <- {lines[i]}"
+                            prev_line = lines[0]
+
+                            for line in lines:
+                                serprint(line)
+
+                                # If the command returned an error
+                                if "ERROR" in line:
+                                    break
+                                # If the command finished returning a response
+                                if "OK" in line:
+                                    break
+
+                        except Exception as e:
+                            print(f"ERROR: {e}\r\nAttempting to continue...\r\n")
+
+                elif port_svar.get() != "Select Port":
+                    serprint(f"{get_timestamp()} Error: Serial Device \"{port_svar.get()}\" is not open.")
+                else:
+                    serprint(f"{get_timestamp()} Error: Please select a serial port.")
+
+
+# END - Custom Classes ############################################################################
+
+####################################################################################################
+######################################## Functions #################################################
+####################################################################################################
 def get_devices() -> List[str]:
     devices = serial.tools.list_ports.comports()
     port_list = []
@@ -364,12 +467,10 @@ def load_commands() -> List[ATCommand]:
 
 def get_timestamp(filename_usable:bool=False) -> str:
     ts = dt.datetime.now()
-
     # Contains symbols; used for serial output (not valid file names)
     if not filename_usable:
         ts_str = ts.strftime(format="%m%d%Y-%H:%M:%S.%f")[:-3]
         return (f"[{ts_str}]")
-
     # Valid file name; used for logs    
     elif filename_usable:
         return ts.strftime("%Y%m%d_%H%M%S")
@@ -410,6 +511,23 @@ def load_settings() -> Tuple[Union[str,None], int]:
 
     return port, baudrate
 
+def load_scripts() -> List[ATScript]:
+    directory = "./scripts"
+    scripts = []
+    for filename in os.listdir(directory):
+        f = os.path.join(directory, filename)
+        if os.path.isfile(f):
+            scripts.append(ATScript(f))
+    for script in scripts:
+        script.extract_commands()
+        # script.print_info()
+
+    # except:
+    #     print("./scripts/* could not be opened or is missing. No scripts will be loaded")
+    #     pass
+
+    return scripts
+
 def save_log() -> None:
     ts = get_timestamp(filename_usable=True)
     file = asksaveasfile(confirmoverwrite=True,
@@ -425,11 +543,9 @@ def refresh_devices() -> None:
     global port_menu
     port_list = get_devices()
     port_menu['menu'].delete(0,tk.END)
-
     menu = port_menu["menu"]
     for port in port_list:
         menu.add_command(label=port, command=lambda value=port: port_svar.set(value))
-
     port_svar.set("Select Port")  # Reset to default
 
 def print_info() -> None:
@@ -437,45 +553,70 @@ def print_info() -> None:
     serprint(f"port_svar        = {port_svar}")
     serprint(f"port_svar.get()  = {port_svar.get()}")
 
+def get_cmd_columns(event=None):
+    root.update_idletasks()  # Ensure all geometry is updated
+    button_width_pixels = command_buttons[0].winfo_reqwidth()  # Get the actual width of the buttons in pixels
+    columns = max(1, int(commands_tab.winfo_width() / button_width_pixels))  # Calculate the number of columns
 
+    for i, button in enumerate(command_buttons):
+        row = i // columns  # Calculate row number
+        col = i % columns   # Calculate column number
+        button.grid(row=row, column=col, padx=PADDING_X, pady=PADDING_Y)
 
+def get_script_columns(event=None):
+    root.update_idletasks()  # Ensure all geometry is updated
+    button_width_pixels = script_buttons[0].winfo_reqwidth()  # Get the actual width of the buttons in pixels
+    columns = max(1, int(scripts_tab.winfo_width() / button_width_pixels))  # Calculate the number of columns
+
+    for i, button in enumerate(script_buttons):
+        row = i // columns  # Calculate row number
+        col = i % columns   # Calculate column number
+        button.grid(row=row, column=col, padx=PADDING_X, pady=PADDING_Y)
 
 ####################################################################################################
 ######################################### WIDGETS ##################################################
 ####################################################################################################
 loaded_port, loaded_baud = load_settings()
 
-# TOOLBAR BUTTONS
+# TOOLBAR ##########################################################################################
+# Buttons
 tool_frame      = tk.Frame(root)
 tool_save       = ToolbarButton(master=tool_frame, command=save_log, hint="Save Log", icon="assets/icon_save_small.png")
 tool_refresh    = ToolbarButton(master=tool_frame, command=refresh_devices, hint="Refresh serial device list", icon="assets/icon_refresh.png")
 tool_settings   = ToolbarButton(master=tool_frame, command=None, hint="Settings: TODO", icon="assets/icon_settings.png")
 tool_export     = ToolbarButton(master=tool_frame, command=None, hint="Export Settings: TODO", icon="assets/icon_export_settings.png")
 tool_info       = ToolbarButton(master=tool_frame, command=print_info, hint="Print serial port(s) information", icon="assets/icon_serial_info.png")
-
 tool_frame.pack(side=tk.TOP,anchor=tk.W)
 tool_save.pack(side=tk.LEFT)
 tool_refresh.pack(side=tk.LEFT)
 tool_info.pack(side=tk.LEFT)
 tool_settings.pack(side=tk.LEFT)
 tool_export.pack(side=tk.LEFT)
+# END - TOOLBAR ###################################################################################
 
-# SEPARATOR
+
+# DIVIDER #########################################################################################
 separator = ttk.Separator(root, orient=HORIZONTAL)
 separator.pack(fill=X)
+# END - DIVIDER ###################################################################################
 
-# NOTEBOOK AND TABS: PACKING
+
+# NOTEBOOK ########################################################################################
 notebook.pack(fill='both', padx=2, pady=2)
-settings_tab = ttk.Frame(notebook)
-commands_tab = ttk.Frame(notebook)
-notebook.add(settings_tab, text="Settings")
-notebook.add(commands_tab, text="Commands")
+settings_tab    = ttk.Frame(notebook)
+commands_tab    = ttk.Frame(notebook)
+scripts_tab     = ttk.Frame(notebook)
+notebook.add(settings_tab, text=" Settings ", )
+notebook.add(commands_tab, text=" Commands ")
+notebook.add(scripts_tab, text=" Scripts ")
+# END - NOTEBOOK #################################################################################
 
-# SETTINGS TAB: COLUMN 1
+
+# SETTINGS TAB  ###################################################################################
+# Column 1
 column1 = tk.Frame(settings_tab)
 column1.pack(side=tk.LEFT)
-
-# COMPORT SELECT
+# COM Port select
 port_list = get_devices()                                       # Get list of serial ports
 port_frame = tk.Frame(column1)                                  # Make frame for port selection
 port_frame.pack(side=tk.TOP)                                    # Pack frame into GUI
@@ -486,8 +627,7 @@ port_svar.set(loaded_port)                                      #   Default vari
 port_menu = OptionMenu(port_frame, port_svar, *port_list)       #   Create drop-down menu listing port options
 port_menu.config(font=LABEL_FONT, cnf=OPTION_CNF)               #   Configure the menu style
 port_menu.pack(side=tk.LEFT)                                    #   Pack menu into frame
-
-# BAUDRATE SELECT
+# Baudrate select
 baud_frame = tk.Frame(column1)                                  # Make frame for baud selection
 baud_frame.pack(side=tk.TOP)                                    # Pack frame into GUI
 baud_labl = Label(baud_frame, text="Baud:", cnf=LABEL_CNF)      #   Label the selection box
@@ -497,50 +637,54 @@ baud_ivar.set(loaded_baud)                                      #   Set the baud
 baud_menu = OptionMenu(baud_frame, baud_ivar, *BAUD_OPTIONS)    #   Create Drop-down menu listing baud options
 baud_menu.config(font=LABEL_FONT, cnf=OPTION_CNF)               #   Configure the menu style
 baud_menu.pack(side=tk.LEFT)                                    #   Pack menu into frame
-
-# CONNECT BUTTON
+# Connect button
 conn_frame = tk.Frame(column1)                                      # Make frame for serial connect button
 conn_frame.pack(side=tk.TOP)                                        # Pack frame into GUI
 conn_labl = Label(conn_frame, text="Connection:", cnf=LABEL_CNF)    #   Label the connect button
 conn_labl.pack(side=tk.LEFT)                                        #   Pack label into the frame
 conn_switch = SerialPowerSwitch(master=conn_frame, font=LABEL_FONT) #   Create toggle switch button
 conn_switch.pack(side=tk.LEFT)        #   Pack button into frame
-
-# SETTINGS TAB: COLUMN 2
+# Column 2
 column2 = tk.Frame(settings_tab,background=TAB_ACTIVE_BG)
 column2.pack(side=tk.LEFT, fill=tk.Y)
 
-# LIVE TRACE BUTTON
-trac_frame = tk.Frame(column2)                                  # Make frame for serial connect button
-trac_frame.pack(side=tk.TOP)                                    # Pack frame into GUI
-trac_labl = Label(column2, text="Live Trace:", cnf=LABEL_CNF)   #   Label the connect button
-trac_labl.pack(side=tk.LEFT)                                    #   Pack label into the frame
-trac_switch = LiveTraceSwitch(master=column2, font=LABEL_FONT)  #   Create toggle switch button
-trac_switch.pack(side=tk.LEFT,padx=PADDING_X,pady=PADDING_Y)    #   Pack button into frame
+# Subscribe to unsolicited messages
+trac_frame = tk.Frame(column2)                                          # Make frame for serial connect button
+trac_frame.pack(side=tk.TOP)                                            # Pack frame into GUI
+trac_labl = Label(column2, 
+                  text="Show Unsolicited Messages", cnf=LABEL_CNF)      #   Label the connect button
+trac_labl.pack(side=tk.LEFT)                                            #   Pack label into the frame
+trac_switch = LiveTraceSwitch(master=column2, font=LABEL_FONT)          #   Create toggle switch button
+trac_switch.pack(side=tk.LEFT,padx=PADDING_X,pady=PADDING_Y)            #   Pack button into frame
+# END - SETTINGS TAB  #############################################################################
 
 
-# AT BUTTONS
+# COMMANDS TAB ####################################################################################
+# AT Command buttons
 command_buttons = []
 at_commands = load_commands()
 for command in at_commands:
     command_buttons.append(ATButton(master=commands_tab, at_command=command))
+commands_tab.bind("<Configure>", get_cmd_columns)
+# END - COMMANDS TAB ##############################################################################
 
-def get_columns(event=None):
-    root.update_idletasks()  # Ensure all geometry is updated
-    button_width_pixels = command_buttons[0].winfo_reqwidth()  # Get the actual width of the buttons in pixels
-    commands_tab_width = commands_tab.winfo_width()       # Get the current width of the commands tab
-    columns = max(1, int(commands_tab_width / button_width_pixels))  # Calculate the number of columns
+# SCRIPTS TAB #####################################################################################
+# Script buttons
+script_buttons = []
+scripts = load_scripts()
+for script in scripts:
+    script_buttons.append(ATScriptButton(master=scripts_tab, script=script))
+for script_button in script_buttons:
+    script_button.pack(padx=5, pady=5)
+scripts_tab.bind("<Configure>", get_script_columns)
+# END - SCRIPTS TAB ##############################################################################
 
-    for i, button in enumerate(command_buttons):
-        row = i // columns  # Calculate row number
-        col = i % columns   # Calculate column number
-        button.grid(row=row, column=col, padx=PADDING_X, pady=PADDING_Y)
 
-
-commands_tab.bind("<Configure>", get_columns)
+# SERIAL MONITOR ##################################################################################
 serial_monitor.pack(padx=PADDING_X, pady=PADDING_Y)
 serial_monitor.bind("<Key>", disable_typing)
 serial_monitor.bind("<Control-c>", lambda event: on_copy())
+# END - SERIAL MONITOR ############################################################################
 
 root.mainloop()
 

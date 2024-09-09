@@ -8,6 +8,7 @@ import tkinter.filedialog
 from tkinter.filedialog import asksaveasfile
 import serial
 from typing import Union, Tuple, List, Optional, Callable
+from colors import Colors
 
 import serial.tools
 import serial.tools.list_ports
@@ -24,6 +25,8 @@ DIM_Y = 720
 
 serial_lock = threading.Lock()
 enable_trace = False
+# cmd_thread = threading.Thread()
+# script_thread = threading.Thread()
 
 root = tk.Tk()
 root.title("AT Commander")
@@ -115,7 +118,8 @@ tab_style.theme_create( "50shadesofgray",
 tab_style.theme_use("50shadesofgray")
 notebook = ttk.Notebook(root, style="TNotebook")
 
-serial_monitor = Text(root, height="100", width="150", fg=WHITE, bg=GRAY_1, font=MONITOR_FONT)
+serial_input    = Text(root, height = "1", width="150", fg=WHITE, bg=GRAY_1, font=MONITOR_FONT)
+serial_monitor  = Text(root, height="100", width="150", fg=WHITE, bg=GRAY_1, font=MONITOR_FONT)
 
 
 ####################################################################################################
@@ -259,7 +263,8 @@ class ATButton(tk.Button):
     def submit_cmd(self) -> None:
         # print(f"{self.winfo_width()}x{self.winfo_height()}\r\n")  # DEBUG
         # Running "submit_cmd" in separate thread to prevent blocking the main thread
-        threading.Thread(target=self.send_at_cmd,args=(self.at_command,), daemon=True).start()
+        cmd_thread = threading.Thread(target=self.send_at_cmd,args=(self.at_command,), daemon=True)
+        cmd_thread.start()
 
     def send_at_cmd(self, cmd: ATCommand) -> None:
         global nRF9160
@@ -330,22 +335,20 @@ class ToolbarButton(tk.Button):
             self.icon_image = photo
 
 class ATScript():
-
-    def __init__(self, filename:str, delay_ms:int=0) -> None:
+    def __init__(self, filename:str, delay_s:float=.175) -> None:
         self.filename = filename
-        self.delay_ms = delay_ms
+        self.delay_s = delay_s
         self.commands = []
         self.name = None
         self.desc = None
 
-
     def extract_commands(self) -> None:
-        print("extracting commands")
         # Keywords
         KW_NAME = "[NAME]"
         KW_DESC = "[DESC]"
         KW_STRT = "[START]"
         KW_STOP = "[END]"
+        KW_WAIT = "[WAIT]"
         running = False
         with open(self.filename, "r") as f:
             for line in f.readlines():
@@ -363,11 +366,12 @@ class ATScript():
                         elif running:
                             if not KW_STOP in line:
                                 line_no_cmnt = line.split("//")[0]
-                                self.commands.append(line_no_cmnt.split()[0])
+                                final = line_no_cmnt.strip()
+                                print(final)
+                                self.commands.append(final)
                             else:
                                 running = False
                                 break
-                
 
     def print_info(self) -> None:
         print(f"Name: {self.name}")
@@ -380,48 +384,46 @@ class ATScript():
 class ATScriptButton(tk.Button):
     def __init__(self, master:Tk, script:ATScript) -> None:
         super().__init__(master=master, command=self.run_script)
-        print("Making Button")
         self.script = script
         self.config(text=f"{script.name}",font=LABEL_FONT,width=BUTTON_WIDTH)
         self.tooltip = Tooltip(self, script.desc)
 
     def run_script(self) -> None:
-        print("Running script")
         # Running "run_script" in separate thread to prevent blocking the main thread
-        threading.Thread(target=self.send_commands,args=(self.script,), daemon=True).start()
+        self.script_thread = threading.Thread(target=self.send_commands,args=(self.script,), daemon=True)
+        self.script_thread.start()
 
     def send_commands(self, script: ATScript) -> None:
         global nRF9160
         if nRF9160 is not None:
             with serial_lock:
                 if nRF9160.is_open:
-                    stamps = []
                     for cmd in script.commands:
-                        serprint(f"{get_timestamp()} -> {cmd}")
-                        nRF9160.write(f"{cmd}\r\n".encode())
-                        try:
-                            response = nRF9160.read_all().decode()
-                            while not "OK" in response and not "ERROR" in response:
+                        if "[WAIT]" in cmd:
+                            wait_time = int(cmd.split("[WAIT]")[1].strip())
+                            serial_monitor.insert(tk.END, f"{get_timestamp()} -> Waiting for {wait_time} seconds... ")
+                            start_index = serial_monitor.index('insert')
+                            s_line, s_char = start_index.split(".")
+                            for i in range(wait_time):
+                                serial_monitor.replace(f"{s_line}.{s_char}", f"{s_line}.{int(s_char)+3}", f"{wait_time - i}")
+                                time.sleep(1)
+                            serial_monitor.replace(f"{s_line}.{s_char}", f"{s_line}.{int(s_char)+3}", f"{wait_time} seconds elapsed.\r\n")
+                        else:
+                            serprint(f"{get_timestamp()} -> {cmd}")
+                            for c in cmd:
+                                print(c)
+                                nRF9160.write(c.encode())
+                                time.sleep(script.delay_s)
+                            nRF9160.write(("\r\n").encode())
+                            time.sleep(1)
+                            # nRF9160.write(f"{cmd}\r\n".encode())
+                            try:
                                 response = nRF9160.read_all().decode()
-                                stamps.append(get_timestamp())
-
-                            lines = response.split("\n")
-                            for i in range(len(lines)-2):
-                                lines[i] = f"{stamps[i]} <- {lines[i]}"
-                            prev_line = lines[0]
-
-                            for line in lines:
-                                serprint(line)
-
-                                # If the command returned an error
-                                if "ERROR" in line:
-                                    break
-                                # If the command finished returning a response
-                                if "OK" in line:
-                                    break
-
-                        except Exception as e:
-                            print(f"ERROR: {e}\r\nAttempting to continue...\r\n")
+                            except Exception as e:
+                                print(e)
+                                pass
+                            if response:
+                                serprint(response, response=True)
 
                 elif port_svar.get() != "Select Port":
                     serprint(f"{get_timestamp()} Error: Serial Device \"{port_svar.get()}\" is not open.")
@@ -441,14 +443,64 @@ def get_devices() -> List[str]:
         port_list.append(dev.name)
     return port_list
 
-def serprint(msg: str) -> None:
-    """Prints a string to the serial monitor widget
+def serprint(msg: str, response = False) -> None:
+    """Prints a string to the serial monitor widget with specified color.
 
     Args:
-        msg (str): The message to be stripped of leading/trailing white space and printed
-        to the serial monitor, followed by a carriage return and linefeed.
+        msg (str): The message to be printed.
+        color (str): The color in which the message should be displayed.
     """
-    serial_monitor.insert(tk.END,f"{msg.strip()}\r\n")
+    color = "light blue" if not response else "white"
+    # Configure the tag for the specified color
+    serial_monitor.tag_config(color, foreground=color)
+    lines = msg.split("\n")
+    # Insert the message with the specified color tag
+    if response:
+        lines = msg.splitlines()
+        last_line = lines[-1]
+        while last_line.strip() == "" or last_line.strip() == "CLI>":
+            lines.pop()
+            last_line = lines[-1]
+        
+        first_line = lines[0]
+        while first_line.strip() == "":
+            lines.reverse()
+            lines.pop()
+            lines.reverse()
+            first_line = lines[0]
+
+        
+        # new_lines = []
+        # for i in range(len(lines)):
+        #     curr_line = lines[i]
+        #     next_line = lines[(i+1)%len(lines)]
+        #     new_lines.append(curr_line)
+        #     if curr_line.strip() == "":
+        #         while next_line.strip() == "":
+        #             i += 1
+        #             next_line = lines[(i+1)%len(lines)]
+        # lines = new_lines
+                    
+
+    prev_blank = False  # Previous line was blank - used to eradicate double new lines
+    for line in lines:
+        line = remove_ansi_escape_codes(line)
+        valid = True
+        # if (line.strip() == "") and (prev_blank == True):
+        #     valid = False
+        # if line.strip() != "":
+        #     prev_blank = False
+        # else:
+        #     prev_blank = True
+        if valid:
+            if response:
+                serial_monitor.insert(tk.END, " > ")
+            serial_monitor.insert(tk.END, f"{line}\r\n")
+            serial_monitor.tag_add(color, f"{float(serial_monitor.index(tk.END)) - 1:.1f}", tk.END)
+    
+    if response:
+        serial_monitor.insert(tk.END, "")
+    # Scroll to the end to keep the latest text in view
     serial_monitor.see(tk.END)
 
 def load_commands() -> List[ATCommand]:
@@ -494,6 +546,26 @@ def on_copy():
     # Because Ctrl+C is not working natively for some dumb reason
     root.clipboard_clear()                                                        # Clear the clipboard
     serial_monitor.clipboard_append(serial_monitor.get("sel.first", "sel.last"))  # Append selected text to clip board
+
+def on_enter():
+    command = serial_input.get("1.0",tk.END)
+    serial_input.delete("1.0", tk.END)
+    hub_write(command)
+
+def hub_write(text:str) -> None:
+    serprint(f"{get_timestamp()} -> {text.strip()}")
+    for c in text:
+        nRF9160.write(c.encode())
+        time.sleep(script.delay_s)
+    nRF9160.write(("\r\n").encode())
+    time.sleep(1)
+    try:
+        response = nRF9160.read_all().decode()
+    except Exception as e:
+        print(e)
+        pass
+    if response:
+        serprint(response, response=True)
 
 def load_settings() -> Tuple[Union[str,None], int]:
     port = DEFAULT_PORT
@@ -572,6 +644,8 @@ def get_script_columns(event=None):
         row = i // columns  # Calculate row number
         col = i % columns   # Calculate column number
         button.grid(row=row, column=col, padx=PADDING_X, pady=PADDING_Y)
+
+
 
 ####################################################################################################
 ######################################### WIDGETS ##################################################
@@ -674,11 +748,13 @@ script_buttons = []
 scripts = load_scripts()
 for script in scripts:
     script_buttons.append(ATScriptButton(master=scripts_tab, script=script))
-for script_button in script_buttons:
-    script_button.pack(padx=5, pady=5)
 scripts_tab.bind("<Configure>", get_script_columns)
 # END - SCRIPTS TAB ##############################################################################
 
+# SERIAL INPUT ##################################################################################
+serial_input.pack(padx=PADDING_X, pady=PADDING_Y)
+serial_input.bind("<Return>", lambda event: on_enter())
+# END - SERIAL MONITOR ############################################################################
 
 # SERIAL MONITOR ##################################################################################
 serial_monitor.pack(padx=PADDING_X, pady=PADDING_Y)

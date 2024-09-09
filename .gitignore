@@ -4,6 +4,9 @@ at_3.12.5/
 # VS Code garbage
 .vscode
 
+# Custom User Scripts for AT Commander
+scripts/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
